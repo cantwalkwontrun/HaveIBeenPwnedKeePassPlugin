@@ -1,4 +1,30 @@
-﻿# Have I Been Pwned KeePass Plugin
+---
+lang: en-GB
+---
+
+# Have I Been Pwned KeePass Plugin
+
+## Maintenance fork
+
+This development fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
+
+No fork release binaries have been published. The installation links below point to the original upstream release, which does not include these changes. Update checks are disabled in this development build until a fork release and its update manifest are available.
+
+## Building and testing
+
+Install the .NET SDK and .NET Framework 4.7.2 targeting pack on Windows. Extract a verified [official KeePass portable package](https://keepass.info/download.html) into `KeePass-2.X` at the repository root. This folder supplies `KeePass.exe` as a build reference; use a separate test copy, because Debug builds place the plugin in its `Plugins` directory.
+
+```powershell
+dotnet restore HaveIBeenPwnedKeePassPlugin/HaveIBeenPwnedPlugin.csproj
+dotnet build HaveIBeenPwnedKeePassPlugin/HaveIBeenPwnedPlugin.csproj -c Release --no-restore
+dotnet build tests/RegressionTests.csproj -c Release
+./tests/bin/Release/net472/RegressionTests.exe
+```
+
+The regression harness uses synthetic in-memory entries and fake HTTP responses. Add `--live` to make one real range request for the synthetic hash in the HIBP documentation. It does not open or save a password database. Release output is `HaveIBeenPwnedKeePassPlugin/bin/Release/HaveIBeenPwnedPlugin.dll`.
+
+## Original plugin
+
 
 Simple [KeePass plugin] which uses the service [Have I Been Pwned](https://haveibeenpwned.com/) from [Troy Hunt](https://www.troyhunt.com)
 

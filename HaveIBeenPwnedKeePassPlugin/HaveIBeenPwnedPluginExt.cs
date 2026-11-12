@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Reflection;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using KeePass.Plugins;
@@ -30,10 +30,16 @@ namespace HaveIBeenPwnedPlugin
         private const string BreachCountCustomDataName = "pwned-count";
         private const string Message_NoEntrySelected = "No entry selected!";
         private readonly HIBP _hibp;
+        private readonly CancellationTokenSource _shutdown = new CancellationTokenSource();
+        private readonly Dictionary<PwEntry, EntryCheckContext> _entriesBeingChecked = new Dictionary<PwEntry, EntryCheckContext>();
+        private bool _isBulkCheckRunning;
+        private bool _terminated;
+        private bool _hasReportedHibpError;
 
         public HaveIBeenPwnedPluginExt() => _hibp = new HIBP();
 
-        public override string UpdateUrl => "https://raw.githubusercontent.com/kapsiR/HaveIBeenPwnedKeePassPlugin/main/KeePass.version";
+        // This development fork has no published binaries or update manifest yet.
+        public override string UpdateUrl => null;
 
         /// <summary>
         /// Initialization of the plugin
@@ -48,25 +54,6 @@ namespace HaveIBeenPwnedPlugin
             }
 
             _pluginHost = pluginHost;
-
-            try
-            {
-                // Supported protocols for HIBP are >= TLS 1.2
-                // https://haveibeenpwned.com/API/v2#HTTPS
-
-                // We want to enforce secure defaults, hence we don't rely on SecurityProtocolType.SystemDefault
-                // TLS 1.3 is supported since Windows Server 2022 / Windows 11, version 21H2
-                // The enum value for TLS 1.3 (0x3000) has been added in .NET Framework 4.8
-                // Since we target 4.7.2, we use it directly as value
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
-            }
-            catch (NotSupportedException)
-            {
-                MessageService.ShowWarning($"Can't load {Assembly.GetAssembly(typeof(HaveIBeenPwnedPluginExt)).GetName()}",
-                                           $"{nameof(SecurityProtocolType)} '{nameof(SecurityProtocolType.Tls12)}' is not supported!");
-
-                return false;
-            }
 
             InitializeCustomConfigSettings();
             InitializeEvents();
@@ -89,19 +76,21 @@ namespace HaveIBeenPwnedPlugin
 
         private async void PwEntry_TouchedAsync(object o, ObjectTouchedEventArgs e)
         {
-            if (!_checkPasswordOnEntryTouched)
+            if (_terminated || !_checkPasswordOnEntryTouched || _isBulkCheckRunning)
             {
                 return;
             }
 
             if (e.Modified && e.Object is PwEntry pwEntry)
             {
-                if (CheckEntryIgnoreConditions(pwEntry) != PwEntryIgnoreState.None)
+                // EntryTouched also fires for editor/history clones. Only check live entries.
+                if (!new EntryCheckContext(_pluginHost.Database, pwEntry).IsCurrent(_pluginHost.Database) ||
+                    CheckEntryIgnoreConditions(pwEntry) != PwEntryIgnoreState.None)
                 {
                     return;
                 }
 
-                await CheckHaveIBeenPwnedForEntry(pwEntry);
+                await CheckHaveIBeenPwnedForEntry(pwEntry, automatic: true);
             }
         }
 
@@ -131,7 +120,7 @@ namespace HaveIBeenPwnedPlugin
             return PwEntryIgnoreState.None;
         }
 
-        private async Task CheckHaveIBeenPwnedForEntry(PwEntry pwEntry, Action executesWhenEntryIsGood = null)
+        private async Task CheckHaveIBeenPwnedForEntry(PwEntry pwEntry, Action executesWhenEntryIsGood = null, bool automatic = false)
         {
             if (pwEntry == null)
             {
@@ -144,16 +133,23 @@ namespace HaveIBeenPwnedPlugin
                 return;
             }
 
+            var context = new EntryCheckContext(_pluginHost.Database, pwEntry);
+            if (_terminated || _isBulkCheckRunning || !context.IsCurrent(_pluginHost.Database)) return;
+            if (_entriesBeingChecked.TryGetValue(pwEntry, out EntryCheckContext pending) && pending.IsCurrent(_pluginHost.Database)) return;
+            _entriesBeingChecked[pwEntry] = context;
             try
             {
-                using (SHA1Managed sha1 = new SHA1Managed())
+                using (SHA1 sha1 = SHA1.Create())
                 {
-                    var (isBreached, breachCount) = await _hibp.CheckRangeAsync(ComputeSha1HexPartsFromEntry(pwEntry, sha1));
+                    var (isBreached, breachCount) = await _hibp.CheckRangeAsync(ComputeSha1HexPartsFromEntry(pwEntry, sha1), _shutdown.Token);
+                    if (_terminated || !context.IsCurrent(_pluginHost.Database) ||
+                        (automatic && (!_checkPasswordOnEntryTouched || CheckEntryIgnoreConditions(pwEntry) != PwEntryIgnoreState.None))) return;
 
                     bool entryModified = false;
                     if (isBreached)
                     {
                         entryModified = UpdateEntryWithBreachInformation(pwEntry, breachCount);
+                        UpdateUI_EntryList(entryModified);
 
                         MessageService.ShowWarning($"Oh no. This password is breached and has been seen {breachCount} times before!",
                                                    $"Source: https://haveibeenpwned.com");
@@ -161,23 +157,34 @@ namespace HaveIBeenPwnedPlugin
                     else
                     {
                         entryModified = UpdateEntryRemoveBreachInformation(pwEntry);
+                        UpdateUI_EntryList(entryModified);
                         executesWhenEntryIsGood?.Invoke();
                     }
-
-                    UpdateUI_EntryList(entryModified);
                 }
             }
             catch (HttpRequestException)
             {
-                SetHibpErrorState();
+                if (!_terminated && context.IsCurrent(_pluginHost.Database)) SetHibpErrorState();
+            }
+            catch (OperationCanceledException)
+            {
+                // HttpClient timeouts also arrive as cancellation on .NET Framework.
+                if (!_terminated && context.IsCurrent(_pluginHost.Database)) SetHibpErrorState();
+            }
+            finally
+            {
+                if (_entriesBeingChecked.TryGetValue(pwEntry, out EntryCheckContext current) && ReferenceEquals(current, context))
+                    _entriesBeingChecked.Remove(pwEntry);
             }
         }
 
         private void SetHibpErrorState()
         {
             UnsubscribeEvents();
+            if (_terminated || _hasReportedHibpError) return;
+            _hasReportedHibpError = true;
 
-            MessageService.ShowWarning("There was a connectivity error while checking the HIBP Password Api.",
+            MessageService.ShowWarning("The HIBP password check failed (connection, timeout or invalid response).",
                                        "Automatic checks, e.g. when an entry gets modified, are disabled until you restart KeePass.",
                                        "You can still use all manual functions once connectivity is restored.");
         }
@@ -186,28 +193,25 @@ namespace HaveIBeenPwnedPlugin
         /// Removes breach tag from entry
         /// </summary>
         /// <param name="pwEntry"></param>
-        /// <param name="removedPwnedTagCount"></param>
         /// <returns><c>true</c>, if any breach tag has been removed, otherwise false</returns>
         private bool UpdateEntryRemoveBreachInformation(PwEntry pwEntry)
         {
-            if (pwEntry.Tags.Contains(BreachedTag))
+            bool modified = pwEntry.RemoveTag(BreachedTag);
+            if (pwEntry.CustomData.Exists(BreachCountCustomDataName))
             {
-                pwEntry.Tags.Remove(BreachedTag);
                 pwEntry.CustomData.Remove(BreachCountCustomDataName);
-                UpdatePwEntryDates(pwEntry);
-
-                return true;
+                modified = true;
             }
-
-            return false;
+            if (modified) UpdatePwEntryDates(pwEntry);
+            return modified;
         }
 
         private void UpdatePwEntryDates(PwEntry pwEntry)
         {
             if (_isModifyPwEntryDatesEnabled)
             {
-                pwEntry.LastModificationTime = DateTime.Now;
-                pwEntry.LastAccessTime = DateTime.Now;
+                pwEntry.LastModificationTime = DateTime.UtcNow;
+                pwEntry.LastAccessTime = DateTime.UtcNow;
             }
         }
 
@@ -216,32 +220,29 @@ namespace HaveIBeenPwnedPlugin
         /// </summary>
         /// <param name="pwEntry"></param>
         /// <param name="breachCount"></param>
-        /// <returns><c>true</c>, if breach tag has been newly added, otherwise <c>false</c></returns>
-        private bool UpdateEntryWithBreachInformation(PwEntry pwEntry, int breachCount)
+        /// <returns><c>true</c>, if breach metadata has changed, otherwise <c>false</c></returns>
+        private bool UpdateEntryWithBreachInformation(PwEntry pwEntry, long breachCount)
         {
-            if (!pwEntry.Tags.Contains(BreachedTag))
+            bool modified = pwEntry.AddTag(BreachedTag);
+            string count = breachCount.ToString(CultureInfo.InvariantCulture);
+            if (pwEntry.CustomData.Get(BreachCountCustomDataName) != count)
             {
-                pwEntry.AddTag(BreachedTag);
-
-                if (breachCount > 0)
-                {
-                    pwEntry.CustomData.Set(BreachCountCustomDataName, breachCount.ToString());
-                }
-
-                UpdatePwEntryDates(pwEntry);
-
-                return true;
+                pwEntry.CustomData.Set(BreachCountCustomDataName, count);
+                modified = true;
             }
-
-            return false;
+            if (modified) UpdatePwEntryDates(pwEntry);
+            return modified;
         }
 
         public override void Terminate()
         {
-            SaveCurrentCustomConfigSettings();
+            if (_terminated) return;
+            _terminated = true;
             UnsubscribeEvents();
-
+            _shutdown.Cancel();
+            if (_pluginHost != null) SaveCurrentCustomConfigSettings();
             _hibp.Dispose();
+            _shutdown.Dispose();
         }
 
         private void UnsubscribeEvents()
@@ -407,104 +408,113 @@ namespace HaveIBeenPwnedPlugin
 
         private async void CheckAllPasswordsMenuItem_ClickAsync(object sender, EventArgs e)
         {
-            if (!IsDatabaseOpen())
-            {
-                return;
-            }
+            if (_terminated || _isBulkCheckRunning || _entriesBeingChecked.Count > 0 || !IsDatabaseOpen()) return;
 
-            var entries = _pluginHost.Database.RootGroup.GetEntries(true) as IEnumerable<PwEntry>;
+            var messages = await CheckAllPasswordsAsync(_pluginHost.Database, _pluginHost.MainWindow.CreateStatusBarLogger());
+            if (!_terminated) MessageService.ShowInfo(messages);
+        }
 
+        private async Task<string[]> CheckAllPasswordsAsync(PwDatabase database, KeePassLib.Interfaces.IStatusLogger statusBarLogger)
+        {
+            var rootGroup = database.RootGroup;
+            var entries = rootGroup.GetEntries(true).ToList();
             int skippedExpiredEntriesCount = 0;
             int skippedIgnoredEntriesCount = 0;
             int skippedEmptyPasswordEntriesCount = 0;
+            int skippedChangedEntriesCount = 0;
             int checkedEntriesCount = 0;
             int pwnedEntriesCount = 0;
             int addedPwnedTagCount = 0;
             int removedPwnedTagCount = 0;
-
-            using (SHA1Managed sha1 = new SHA1Managed())
+            bool modified = false;
+            bool interrupted = false;
+            _isBulkCheckRunning = true;
+            try
             {
-                int entriesCount = entries.Count();
-                var statusBarLogger = _pluginHost.MainWindow.CreateStatusBarLogger();
-                string statusText = "Checking all passwords against HIBP pwned passwords... {0}/" + entriesCount;
-                statusBarLogger.StartLogging(string.Format(statusText, 0), false);
-                double progress = 1;
-
-                foreach (PwEntry entry in entries)
+                statusBarLogger.StartLogging("Checking passwords against HIBP...", false);
+                using (SHA1 sha1 = SHA1.Create())
                 {
-                    checkedEntriesCount++;
-
-                    var ignoreState = CheckEntryIgnoreConditions(entry);
-                    switch (ignoreState)
+                    for (int i = 0; i < entries.Count; i++)
                     {
-                        case PwEntryIgnoreState.IsExpired:
-                            skippedExpiredEntriesCount++;
-                            continue;
-
-                        case PwEntryIgnoreState.IsIgnored:
-                            skippedIgnoredEntriesCount++;
-                            continue;
-
-                        case PwEntryIgnoreState.IsEmptyPassword:
-                            skippedEmptyPasswordEntriesCount++;
-                            continue;
-
-                        case PwEntryIgnoreState.None:
-                        default:
-                            break;
-                    }
-
-                    (string sha1Prefix, string sha1Suffix) = ComputeSha1HexPartsFromEntry(entry, sha1);
-
-                    try
-                    {
-                        var (isBreached, breachCount) = await _hibp.CheckRangeAsync(sha1Prefix, sha1Suffix);
-
-                        if (isBreached)
+                        if (_terminated || !database.IsOpen || !ReferenceEquals(database, _pluginHost.Database) ||
+                            !ReferenceEquals(rootGroup, database.RootGroup))
                         {
-                            if (UpdateEntryWithBreachInformation(entry, breachCount))
-                            {
-                                addedPwnedTagCount++;
-                            }
-                            pwnedEntriesCount++;
+                            interrupted = true;
+                            break;
                         }
+                        PwEntry entry = entries[i];
+                        var context = new EntryCheckContext(database, entry);
+                        var ignoreState = CheckEntryIgnoreConditions(entry);
+                        if (ignoreState == PwEntryIgnoreState.IsExpired) skippedExpiredEntriesCount++;
+                        else if (ignoreState == PwEntryIgnoreState.IsIgnored) skippedIgnoredEntriesCount++;
+                        else if (ignoreState == PwEntryIgnoreState.IsEmptyPassword) skippedEmptyPasswordEntriesCount++;
+                        else if (!context.IsCurrent(_pluginHost.Database)) skippedChangedEntriesCount++;
                         else
                         {
-                            if (UpdateEntryRemoveBreachInformation(entry))
+                            var result = await _hibp.CheckRangeAsync(ComputeSha1HexPartsFromEntry(entry, sha1), _shutdown.Token);
+                            if (_terminated || !database.IsOpen || !ReferenceEquals(database, _pluginHost.Database) ||
+                                !ReferenceEquals(rootGroup, database.RootGroup))
                             {
-                                removedPwnedTagCount++;
+                                interrupted = true;
+                                break;
+                            }
+                            if (!context.IsCurrent(_pluginHost.Database) || CheckEntryIgnoreConditions(entry) != PwEntryIgnoreState.None)
+                            {
+                                skippedChangedEntriesCount++;
+                            }
+                            else
+                            {
+                                checkedEntriesCount++;
+                                bool wasTagged = entry.HasTag(BreachedTag);
+                                if (result.isBreached)
+                                {
+                                    modified |= UpdateEntryWithBreachInformation(entry, result.breachCount);
+                                    if (!wasTagged) addedPwnedTagCount++;
+                                    pwnedEntriesCount++;
+                                }
+                                else
+                                {
+                                    modified |= UpdateEntryRemoveBreachInformation(entry);
+                                    if (wasTagged) removedPwnedTagCount++;
+                                }
+                                // Mark this database dirty before the next await (it may be saved or locked).
+                                if (modified) database.Modified = true;
                             }
                         }
+                        if (_terminated) break;
+                        statusBarLogger.SetText($"Checking passwords against HIBP... {i + 1}/{entries.Count}", KeePassLib.Interfaces.LogStatusType.Info);
+                        statusBarLogger.SetProgress((uint)((i + 1) * 100L / entries.Count));
                     }
-                    catch (HttpRequestException)
-                    {
-                        SetHibpErrorState();
-                        break;
-                    }
-
-                    statusBarLogger.SetText(string.Format(statusText, progress), KeePassLib.Interfaces.LogStatusType.Info);
-                    statusBarLogger.SetProgress((uint)(progress++ / entriesCount * 100));
                 }
-
+            }
+            catch (HttpRequestException)
+            {
+                interrupted = true;
+                SetHibpErrorState();
+            }
+            catch (OperationCanceledException)
+            {
+                interrupted = true;
+                if (!_terminated) SetHibpErrorState();
+            }
+            finally
+            {
                 statusBarLogger.EndLogging();
+                _isBulkCheckRunning = false;
             }
 
-            if (addedPwnedTagCount > 0 || removedPwnedTagCount > 0)
-            {
-                UpdateUI_EntryList(true);
-            }
-            else
-            {
+            if (_terminated) return new string[0];
+            if (ReferenceEquals(database, _pluginHost.Database) && database.IsOpen && ReferenceEquals(rootGroup, database.RootGroup))
                 UpdateUI_EntryList(false);
-            }
-
-            MessageService.ShowInfo($"Checked entries: {checkedEntriesCount}",
+            return new[] { interrupted ? "Password check incomplete." : "Password check completed.",
+                                    $"Checked entries: {checkedEntriesCount}",
                                     $"Pwned entries: {pwnedEntriesCount}",
                                     $"New pwned entries: {addedPwnedTagCount}",
                                     $"Entries not pwned anymore: {removedPwnedTagCount}",
                                     $"Skipped expired entries: {skippedExpiredEntriesCount}",
                                     $"Skipped ignored entries: {skippedIgnoredEntriesCount}",
-                                    $"Skipped entries with empty passwords: {skippedEmptyPasswordEntriesCount}");
+                                    $"Skipped entries with empty passwords: {skippedEmptyPasswordEntriesCount}",
+                                    $"Skipped changed or unavailable entries: {skippedChangedEntriesCount}" };
         }
 
         private void UpdateUI_EntryList(bool setModified)
@@ -514,18 +524,25 @@ namespace HaveIBeenPwnedPlugin
             // > RefreshEntriesList function could be a better choice, as it only
             // > updates currently listed items and doesn't rebuild the whole list as
             // > UpdateEntryList.
-            _pluginHost.MainWindow?.RefreshEntriesList();
             if (setModified && IsDatabaseOpen())
             {
                 _pluginHost.Database.Modified = true;
             }
+            _pluginHost.MainWindow?.RefreshEntriesList();
         }
 
-        private (string sha1Prefix, string sha1Suffix) ComputeSha1HexPartsFromEntry(PwEntry entry, SHA1Managed sha1Managed)
+        private (string sha1Prefix, string sha1Suffix) ComputeSha1HexPartsFromEntry(PwEntry entry, SHA1 sha1)
         {
-            string sha1Hex = BitConverter.ToString(sha1Managed.ComputeHash(entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8())).Replace("-", string.Empty);
-
-            return (sha1Hex.Substring(0, 5), sha1Hex.Substring(5, sha1Hex.Length - 5));
+            byte[] passwordBytes = entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8();
+            try
+            {
+                string sha1Hex = BitConverter.ToString(sha1.ComputeHash(passwordBytes)).Replace("-", string.Empty);
+                return (sha1Hex.Substring(0, 5), sha1Hex.Substring(5));
+            }
+            finally
+            {
+                MemUtil.ZeroByteArray(passwordBytes);
+            }
         }
 
         private void CheckBoxMenuItem_Option_CheckPasswordOnEntryTouched_Click(object sender, EventArgs e)

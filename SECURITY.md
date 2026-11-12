@@ -1,36 +1,17 @@
-# Security Policy
+---
+lang: en-GB
+---
 
-## General information
+# Security policy
 
-KeePass [has been audited and is broadly trusted].  
-There is a dedicated page about [plugins and plugin security].
-This plugin is listed in the [plugin directory] of KeePass.
+This is a source-only development fork. No fork release binaries, reproducibility guarantees, mandatory collaborator settings or signed release claims are asserted here. The original project and its policy are available [upstream](https://github.com/kapsiR/HaveIBeenPwnedKeePassPlugin/blob/main/SECURITY.md).
 
-All accounts with write access to this repository are mandated to use two-factor authentication and [signed commits].
+A KeePass plugin runs inside the password manager and can access its open databases. Review plugins and obtain KeePass itself from [official sources](https://keepass.info/download.html). Protect the plugin directory against unauthorised modification; see [KeePass plugin guidance](https://keepass.info/help/v2/plugins.html).
 
-### Releases
+This plugin queries the HIBP password range API over HTTPS with a five-character SHA-1 prefix and response padding. The remaining suffix is matched locally. SHA-1 here implements the external range protocol; it is not used to store database passwords. The API still receives the prefix and normal connection metadata, so k-anonymity is not a promise of complete anonymity.
 
-Release builds are configured to be deterministic. (Easily reproducible, since binary content is identical for the same input across compilations)  
-The corresponding Git commit can be read from the product version of the assembly. (e.g. `0.7.1+39ecaf0b99` identifies [39ecaf0b99])  
-Integrity hashes are available on the release page. (Since 2023-01)
+See [REVIEW.md](./REVIEW.md) for the scope of the code review, tests and outstanding runtime validation. The review does not establish that the plugin is free from every vulnerability.
 
-### Updates
+Development builds disable KeePass update checks until a fork release and matching update manifest exist. No automatic installer or uploader has been added.
 
-KeePass queries the [KeePass.version] file for updates, but won't install any update automatically.  
-It is recommended to specifiy appropriate file permissions for the plugin directory so that non-admin users can't hijack the plugin.
-
-## Reporting a Vulnerability
-
-Please use the [private vulnerability reporting] that GitHub provides.  
-I'll do my best to give a timely answer.
-
-For .NET Framework vulnerabilites contact the [Microsoft Security Response Center].  
-
-[private vulnerability reporting]: https://github.com/kapsiR/HaveIBeenPwnedKeePassPlugin/security/advisories
-[Microsoft Security Response Center]: https://msrc.microsoft.com/report/vulnerability/new
-[has been audited and is broadly trusted]: https://keepass.info/help/kb/trust.html
-[plugins and plugin security]: https://keepass.info/help/v2/plugins.html
-[39ecaf0b99]: https://github.com/kapsiR/HaveIBeenPwnedKeePassPlugin/commit/39ecaf0b99f4c37139af6485a1bdc4d9a2c5171d
-[KeePass.version]: https://github.com/kapsiR/HaveIBeenPwnedKeePassPlugin/blob/v0.7.1/KeePass.version
-[plugin directory]: https://keepass.info/plugins.html
-[signed commits]: https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work
+For an upstream vulnerability, follow the original project's [private reporting instructions](https://github.com/kapsiR/HaveIBeenPwnedKeePassPlugin/security/advisories). Do not include real passwords, databases, credentials or other private data in public reports.
