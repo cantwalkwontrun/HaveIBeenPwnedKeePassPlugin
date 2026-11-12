@@ -23,12 +23,13 @@ using KeePassLib.Keys;
 using KeePassLib.Security;
 using KeePassLib.Serialization;
 
-internal static class Program
+internal static partial class Program
 {
     private const string Suffix = "0018A45C4D1DEF81644B54AB7F969B88D65";
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
     private static int _passed, _failed;
 
+    [STAThread]
     private static void Main(string[] args)
     {
         Run("CRLF response", () => CheckResponse(Suffix + ":42\r\n", true, 42));
@@ -184,7 +185,20 @@ internal static class Program
                 Assert(requests == 0);
             }
         });
-        if (args.Length == 1 && args[0] == "--live")
+        RunWorkerEventTests();
+        int dashboarderOption = Array.IndexOf(args, "--dashboarder");
+        if (dashboarderOption >= 0)
+        {
+            if (dashboarderOption + 1 >= args.Length) throw new ArgumentException("Supply the Dashboarder test assembly path.");
+            RunDashboarderTests(args[dashboarderOption + 1]);
+        }
+        int fluentOption = Array.IndexOf(args, "--fluent");
+        if (fluentOption >= 0)
+        {
+            if (fluentOption + 1 >= args.Length) throw new ArgumentException("Supply the Fluent Theme DLL path.");
+            RunFluentTests(args[fluentOption + 1]);
+        }
+        if (Array.IndexOf(args, "--live") >= 0)
             Run("live HIBP query for documented synthetic fixture", () =>
             {
                 using (var hibp = new HIBP()) { var result = Check(hibp).GetAwaiter().GetResult(); Assert(result.Item1 && result.Item2 > 0); }
@@ -215,7 +229,7 @@ internal static class Program
         {
             Task task = CheckEntry(plugin, entry, null, true);
             if (scenario == "shutdown") plugin.Terminate();
-            await task;
+            await task.ConfigureAwait(false);
             Assert(entry.HasTag("pwned") && entry.CustomData.Get("pwned-count") == "4" && !host.Database.Modified);
             if (scenario == "timeout" || scenario == "shutdown") Assert(cancelled);
         }
@@ -298,7 +312,7 @@ internal static class Program
                 case "terminated during request": plugin.Terminate(); break;
             }
             response.SetResult(Response(new string('F', 35) + ":1"));
-            await task;
+            await task.ConfigureAwait(false);
             if (scenario == "unchanged") Assert(!entry.HasTag("pwned") && original.Modified && callback);
             else Assert(entry.HasTag("pwned") && entry.CustomData.Get("pwned-count") == "4" && !callback);
         }
@@ -364,7 +378,7 @@ internal static class Program
         var method = typeof(HIBP).GetMethod("CheckRangeAsync", new[] { typeof(string), typeof(string), typeof(CancellationToken) }) ??
                      typeof(HIBP).GetMethod("CheckRangeAsync", new[] { typeof(string), typeof(string) });
         Task task = (Task)method.Invoke(hibp, method.GetParameters().Length == 3 ? new object[] { "21BD1", Suffix, CancellationToken.None } : new object[] { "21BD1", Suffix });
-        await task;
+        await task.ConfigureAwait(false);
         object result = task.GetType().GetProperty("Result").GetValue(task);
         return ((bool)result.GetType().GetField("Item1").GetValue(result), Convert.ToInt64(result.GetType().GetField("Item2").GetValue(result)));
     }
@@ -396,7 +410,9 @@ internal static class Program
     private sealed class FakeHost : IPluginHost
     {
         public MainForm MainWindow => null;
-        public PwDatabase Database { get; set; }
+        private PwDatabase _database;
+        internal Action OnDatabaseRead;
+        public PwDatabase Database { get { OnDatabaseRead?.Invoke(); return _database; } set { _database = value; } }
         public AceCustomConfig CustomConfig { get; } = new AceCustomConfig();
         public CommandLineArgs CommandLineArgs => null;
         public CipherPool CipherPool => null;

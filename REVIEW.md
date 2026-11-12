@@ -30,12 +30,24 @@ The protocol still uses the [official HIBP range API](https://haveibeenpwned.com
 
 - The original plugin and the changed plugin both built against the signed official KeePass 2.62 assembly, targeting .NET Framework 4.7.2.
 - Final Release builds completed with zero warnings and zero errors.
-- 55 offline regression checks passed using real KeePass entry/database classes, synthetic in-memory data and fake HTTP handlers/loggers.
-- One additional live request using the documented HIBP example hash passed: 56 checks in total. Only its five-character prefix was sent.
+- 64 offline regression checks passed using real KeePass entry/database classes, synthetic in-memory data and fake HTTP handlers/loggers.
+- One additional live request using the documented HIBP example hash passed: 65 checks in total. Only its five-character prefix was sent.
 - An initial 40-check subset was also run against the unmodified upstream source: 13 passed and 27 failed. Several checks exercise different cases of the same underlying issue; this is not a count of distinct vulnerabilities.
 - Checks cover delayed responses, changed passwords, database switches/locks, removed/replaced entries, temporary clones, request duplication, HTTP failures/timeouts, malformed responses, metadata updates, progress, dirty-state timing and logging cleanup.
 - The NuGet advisory check reported no known vulnerable direct or transitive packages in the configured advisory data. The existing build-only Nerdbank.GitVersioning package was retained.
 - `git diff --check` is part of the final local checks. Source and tests are published; downloaded dependencies, binaries, local logs and test artefacts are excluded.
+
+## Companion-plugin compatibility
+
+Automatic entry events can originate on worker threads in other plugins. They are now posted to the UI context captured during initialisation before reading entries, changing request bookkeeping, showing alerts or refreshing controls. Queued callbacks are ignored after termination. Four additional worker-event regression cases cover icon touches, duplicates, ignored entries and shutdown.
+
+Metadata changes also invalidate the main window's child controls after refreshing entries. This lets details panels repaint live tags while preserving entry dates and selection. Bulk scans request this repaint when metadata changed.
+
+Tests exercised the actual icon mutation methods from Custom Icon Dashboarder v1.3.0 and the companion maintenance build 1.3.1.0. The v1.3.0 PLGX source was extracted locally, and its source files matched the release tag; only its packaged project template differed.
+
+The exact released Fluent Theme v1.5.2026.1111 DLL was checked against the release asset digest (`661d27062f0584afe39bd71dc118031355a4457fac4bbc3a85de67a49f93f474`). Its actual details panel rendered synthetic `pwned` tag additions/removals correctly off-screen in light and dark modes without changing entry dates. No third-party plugin source or DLL is bundled in this repository.
+
+Optional fixture checks can be selected with `--dashboarder` followed by a Dashboarder test assembly path, or `--fluent` followed by the exact theme DLL path. These are supplied locally and are not downloaded by the test harness. Include `--live` for the additional synthetic HIBP request.
 
 ## Limits and recommendations
 

@@ -23,6 +23,8 @@ dotnet build tests/RegressionTests.csproj -c Release
 
 The regression harness uses synthetic in-memory entries and fake HTTP responses. Add `--live` to make one real range request for the synthetic hash in the HIBP documentation. It does not open or save a password database. Release output is `HaveIBeenPwnedKeePassPlugin/bin/Release/HaveIBeenPwnedPlugin.dll`.
 
+Optional companion-plugin checks accept `--dashboarder` followed by a locally built Dashboarder DLL and `--fluent` followed by the Fluent Theme v1.5.2026.1111 DLL. These test specific mutation/rendering paths; see the review for the scope and remaining manual checks.
+
 ## Original plugin
 
 

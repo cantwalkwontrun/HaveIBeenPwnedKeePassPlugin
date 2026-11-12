@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Net.Http;
@@ -35,6 +36,8 @@ namespace HaveIBeenPwnedPlugin
         private bool _isBulkCheckRunning;
         private bool _terminated;
         private bool _hasReportedHibpError;
+        private SynchronizationContext _uiContext;
+        private int _uiThreadId;
 
         public HaveIBeenPwnedPluginExt() => _hibp = new HIBP();
 
@@ -54,6 +57,10 @@ namespace HaveIBeenPwnedPlugin
             }
 
             _pluginHost = pluginHost;
+            _uiThreadId = Thread.CurrentThread.ManagedThreadId;
+            _uiContext = SynchronizationContext.Current;
+            if (_uiContext == null && pluginHost.MainWindow != null)
+                _uiContext = new WindowsFormsSynchronizationContext();
 
             InitializeCustomConfigSettings();
             InitializeEvents();
@@ -76,6 +83,17 @@ namespace HaveIBeenPwnedPlugin
 
         private async void PwEntry_TouchedAsync(object o, ObjectTouchedEventArgs e)
         {
+            if (_terminated) return;
+            // Other plugins can touch entries from worker threads. Keep database access,
+            // request bookkeeping and WinForms continuations on KeePass's UI thread.
+            if (Thread.CurrentThread.ManagedThreadId != _uiThreadId)
+            {
+                try { _uiContext?.Post(_ => PwEntry_TouchedAsync(o, e), null); }
+                catch (InvalidAsynchronousStateException) { } // UI thread has exited.
+                catch (InvalidOperationException) { } // Dispatch control has closed.
+                return;
+            }
+
             if (_terminated || !_checkPasswordOnEntryTouched || _isBulkCheckRunning)
             {
                 return;
@@ -505,7 +523,7 @@ namespace HaveIBeenPwnedPlugin
 
             if (_terminated) return new string[0];
             if (ReferenceEquals(database, _pluginHost.Database) && database.IsOpen && ReferenceEquals(rootGroup, database.RootGroup))
-                UpdateUI_EntryList(false);
+                UpdateUI_EntryList(false, modified);
             return new[] { interrupted ? "Password check incomplete." : "Password check completed.",
                                     $"Checked entries: {checkedEntriesCount}",
                                     $"Pwned entries: {pwnedEntriesCount}",
@@ -517,7 +535,7 @@ namespace HaveIBeenPwnedPlugin
                                     $"Skipped changed or unavailable entries: {skippedChangedEntriesCount}" };
         }
 
-        private void UpdateUI_EntryList(bool setModified)
+        private void UpdateUI_EntryList(bool setModified, bool refreshDetails = false)
         {
             // Quote from KeePass.Forms.MainForm.UpdateEntryList
             // > Note that if you only made small changes (like editing an existing entry), the
@@ -529,6 +547,9 @@ namespace HaveIBeenPwnedPlugin
                 _pluginHost.Database.Modified = true;
             }
             _pluginHost.MainWindow?.RefreshEntriesList();
+            // Detail panels may paint live tags without observing date changes.
+            // Repaint child controls while preserving entry dates and selection.
+            if (setModified || refreshDetails) _pluginHost.MainWindow?.Invalidate(true);
         }
 
         private (string sha1Prefix, string sha1Suffix) ComputeSha1HexPartsFromEntry(PwEntry entry, SHA1 sha1)
