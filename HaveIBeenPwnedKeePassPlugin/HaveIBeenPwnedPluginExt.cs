@@ -36,6 +36,10 @@ namespace HaveIBeenPwnedPlugin
         private bool _isBulkCheckRunning;
         private bool _terminated;
         private bool _hasReportedHibpError;
+        private bool _automaticChecksSuspended;
+        private readonly Dictionary<PwEntry, EntryCheckContext> _pendingAutomaticChecks = new Dictionary<PwEntry, EntryCheckContext>();
+        private readonly List<ToolStripMenuItem> _menus = new List<ToolStripMenuItem>();
+        private Action<string[]> _showWarning = messages => MessageService.ShowWarning(messages);
         private SynchronizationContext _uiContext;
         private int _uiThreadId;
 
@@ -94,7 +98,7 @@ namespace HaveIBeenPwnedPlugin
                 return;
             }
 
-            if (_terminated || !_checkPasswordOnEntryTouched || _isBulkCheckRunning)
+            if (_terminated || !_checkPasswordOnEntryTouched || _automaticChecksSuspended)
             {
                 return;
             }
@@ -108,6 +112,11 @@ namespace HaveIBeenPwnedPlugin
                     return;
                 }
 
+                if (_isBulkCheckRunning)
+                {
+                    _pendingAutomaticChecks[pwEntry] = new EntryCheckContext(_pluginHost.Database, pwEntry);
+                    return;
+                }
                 await CheckHaveIBeenPwnedForEntry(pwEntry, automatic: true);
             }
         }
@@ -155,6 +164,7 @@ namespace HaveIBeenPwnedPlugin
             if (_terminated || _isBulkCheckRunning || !context.IsCurrent(_pluginHost.Database)) return;
             if (_entriesBeingChecked.TryGetValue(pwEntry, out EntryCheckContext pending) && pending.IsCurrent(_pluginHost.Database)) return;
             _entriesBeingChecked[pwEntry] = context;
+            RefreshMenus();
             try
             {
                 using (SHA1 sha1 = SHA1.Create())
@@ -169,8 +179,7 @@ namespace HaveIBeenPwnedPlugin
                         entryModified = UpdateEntryWithBreachInformation(pwEntry, breachCount);
                         UpdateUI_EntryList(entryModified);
 
-                        MessageService.ShowWarning($"Oh no. This password is breached and has been seen {breachCount} times before!",
-                                                   $"Source: https://haveibeenpwned.com");
+                        _showWarning(new[] { $"This password appears in breach data {breachCount} times.", "Source: https://haveibeenpwned.com" });
                     }
                     else
                     {
@@ -182,29 +191,67 @@ namespace HaveIBeenPwnedPlugin
             }
             catch (HttpRequestException)
             {
-                if (!_terminated && context.IsCurrent(_pluginHost.Database)) SetHibpErrorState();
+                if (!_terminated && context.IsCurrent(_pluginHost.Database)) SetHibpErrorState(automatic);
             }
             catch (OperationCanceledException)
             {
                 // HttpClient timeouts also arrive as cancellation on .NET Framework.
-                if (!_terminated && context.IsCurrent(_pluginHost.Database)) SetHibpErrorState();
+                if (!_terminated && context.IsCurrent(_pluginHost.Database)) SetHibpErrorState(automatic);
             }
             finally
             {
                 if (_entriesBeingChecked.TryGetValue(pwEntry, out EntryCheckContext current) && ReferenceEquals(current, context))
                     _entriesBeingChecked.Remove(pwEntry);
+                RefreshMenus();
             }
         }
 
-        private void SetHibpErrorState()
+        private void SetHibpErrorState(bool automatic = true)
         {
             UnsubscribeEvents();
-            if (_terminated || _hasReportedHibpError) return;
+            _automaticChecksSuspended = true;
+            _pendingAutomaticChecks.Clear();
+            if (_terminated || (automatic && _hasReportedHibpError)) return;
             _hasReportedHibpError = true;
+            _showWarning(new[] { "The HIBP password check failed (connection, timeout or invalid response).",
+                "No clean result was obtained. Existing breach information has been preserved.",
+                "Automatic checks are disabled until KeePass restarts. Manual checks remain available." });
+        }
 
-            MessageService.ShowWarning("The HIBP password check failed (connection, timeout or invalid response).",
-                                       "Automatic checks, e.g. when an entry gets modified, are disabled until you restart KeePass.",
-                                       "You can still use all manual functions once connectivity is restored.");
+        private async Task DrainPendingAutomaticChecksAsync()
+        {
+            var pending = _pendingAutomaticChecks.ToArray();
+            _pendingAutomaticChecks.Clear();
+            foreach (var item in pending)
+            {
+                if (_terminated || _automaticChecksSuspended || !_checkPasswordOnEntryTouched) break;
+                if (item.Value.IsCurrent(_pluginHost.Database) && CheckEntryIgnoreConditions(item.Key) == PwEntryIgnoreState.None)
+                    await CheckHaveIBeenPwnedForEntry(item.Key, automatic: true);
+            }
+        }
+
+        private void RefreshMenus()
+        {
+            _menus.RemoveAll(menu => menu.IsDisposed);
+            bool busy = _isBulkCheckRunning || _entriesBeingChecked.Count > 0;
+            foreach (var menu in _menus)
+            {
+                foreach (ToolStripItem item in menu.DropDownItems)
+                {
+                    var option = item as ToolStripMenuItem;
+                    if (option == null) continue;
+                    if (option.Name == Option_CheckPasswordOnEntryTouched)
+                    {
+                        option.Checked = _checkPasswordOnEntryTouched;
+                        option.Text = _automaticChecksSuspended ? "Automatic checks paused until restart" : "Check modified entries automatically";
+                    }
+                    else if (option.Name == Option_IgnoreExpiredEntries) option.Checked = _isIgnoreExpiredEntriesEnabled;
+                    else if (option.Name == Option_ShowGoodNewsOnManualEntryCheck) option.Checked = _isShowGoodNewsOnManualEntryCheckEnabled;
+                    else if (option.Name == Option_ModifyPwEntryDates) option.Checked = _isModifyPwEntryDatesEnabled;
+                    else if (option.Name == "CheckCurrent" || option.Name == "CheckAll")
+                        option.Enabled = !_terminated && !busy && _pluginHost != null && IsDatabaseOpen();
+                }
+            }
         }
 
         /// <summary>
@@ -256,6 +303,8 @@ namespace HaveIBeenPwnedPlugin
         {
             if (_terminated) return;
             _terminated = true;
+            _pendingAutomaticChecks.Clear();
+            RefreshMenus();
             UnsubscribeEvents();
             _shutdown.Cancel();
             if (_pluginHost != null) SaveCurrentCustomConfigSettings();
@@ -288,6 +337,7 @@ namespace HaveIBeenPwnedPlugin
 
             ToolStripMenuItem checkCurrentPasswordMenuItem = new ToolStripMenuItem
             {
+                Name = "CheckCurrent",
                 Text = "Check current password"
             };
             checkCurrentPasswordMenuItem.Click += CheckCurrentPasswordMenuItem_ClickAsync;
@@ -295,6 +345,7 @@ namespace HaveIBeenPwnedPlugin
 
             ToolStripMenuItem checkAllPasswordsMenuItem = new ToolStripMenuItem
             {
+                Name = "CheckAll",
                 Text = "Check all passwords"
             };
             checkAllPasswordsMenuItem.Click += CheckAllPasswordsMenuItem_ClickAsync;
@@ -316,7 +367,8 @@ namespace HaveIBeenPwnedPlugin
 
             ToolStripMenuItem checkBoxMenuItem_Option_CheckPasswordOnEntryTouched = new ToolStripMenuItem
             {
-                Text = "Check password when entry gets modified",
+                Name = Option_CheckPasswordOnEntryTouched,
+                Text = "Check modified entries automatically",
                 Checked = _checkPasswordOnEntryTouched
             };
             checkBoxMenuItem_Option_CheckPasswordOnEntryTouched.Click += CheckBoxMenuItem_Option_CheckPasswordOnEntryTouched_Click;
@@ -324,6 +376,7 @@ namespace HaveIBeenPwnedPlugin
 
             ToolStripMenuItem checkBoxMenuItem_Option_SkipExpiredEntries = new ToolStripMenuItem
             {
+                Name = Option_IgnoreExpiredEntries,
                 Text = "Skip expired entries",
                 Checked = _isIgnoreExpiredEntriesEnabled
             };
@@ -332,7 +385,8 @@ namespace HaveIBeenPwnedPlugin
 
             ToolStripMenuItem checkBoxMenuItem_Option_ShowGoodNewsOnManualEntryCheck = new ToolStripMenuItem
             {
-                Text = "Show good news when checking an entry manually too",
+                Name = Option_ShowGoodNewsOnManualEntryCheck,
+                Text = "Show confirmation when no breach is found",
                 Checked = _isShowGoodNewsOnManualEntryCheckEnabled
             };
             checkBoxMenuItem_Option_ShowGoodNewsOnManualEntryCheck.Click += CheckBoxMenuItem_Option_ShowGoodNewsOnManualEntryCheck_Click;
@@ -340,12 +394,16 @@ namespace HaveIBeenPwnedPlugin
 
             ToolStripMenuItem checkBoxMenuItem_Option_ModifyPwEntryDates = new ToolStripMenuItem
             {
-                Text = "Enable entry date changes when breach information is added/removed",
+                Name = Option_ModifyPwEntryDates,
+                Text = "Update entry timestamps when breach information changes",
                 Checked = _isModifyPwEntryDatesEnabled
             };
             checkBoxMenuItem_Option_ModifyPwEntryDates.Click += CheckBoxMenuItem_Option_ModifyPwEntryDates_Click;
             pluginRootMenuItem.DropDownItems.Add(checkBoxMenuItem_Option_ModifyPwEntryDates);
 
+            _menus.Add(pluginRootMenuItem);
+            pluginRootMenuItem.DropDownOpening += (sender, args) => RefreshMenus();
+            RefreshMenus();
             return pluginRootMenuItem;
         }
 
@@ -353,18 +411,21 @@ namespace HaveIBeenPwnedPlugin
         {
             _isModifyPwEntryDatesEnabled = !_isModifyPwEntryDatesEnabled;
             UIUtil.SetChecked(sender as ToolStripMenuItem, _isModifyPwEntryDatesEnabled);
+            RefreshMenus();
         }
 
         private void CheckBoxMenuItem_Option_ShowGoodNewsOnManualEntryCheck_Click(object sender, EventArgs e)
         {
             _isShowGoodNewsOnManualEntryCheckEnabled = !_isShowGoodNewsOnManualEntryCheckEnabled;
             UIUtil.SetChecked(sender as ToolStripMenuItem, _isShowGoodNewsOnManualEntryCheckEnabled);
+            RefreshMenus();
         }
 
         private void CheckBoxMenuItem_Option_SkipExpiredEntries_Click(object sender, EventArgs e)
         {
             _isIgnoreExpiredEntriesEnabled = !_isIgnoreExpiredEntriesEnabled;
             UIUtil.SetChecked(sender as ToolStripMenuItem, _isIgnoreExpiredEntriesEnabled);
+            RefreshMenus();
         }
 
         private async void CheckCurrentPasswordMenuItem_ClickAsync(object sender, EventArgs e)
@@ -375,7 +436,7 @@ namespace HaveIBeenPwnedPlugin
                 {
                     if (_isShowGoodNewsOnManualEntryCheckEnabled)
                     {
-                        MessageService.ShowInfoEx("Good news", $"No pwnage found!",
+                        MessageService.ShowInfoEx("No breach found", $"This password was not found in HIBP breach data.",
                                                                $"Source: https://haveibeenpwned.com");
                     }
                 });
@@ -447,6 +508,7 @@ namespace HaveIBeenPwnedPlugin
             bool modified = false;
             bool interrupted = false;
             _isBulkCheckRunning = true;
+            RefreshMenus();
             try
             {
                 statusBarLogger.StartLogging("Checking passwords against HIBP...", false);
@@ -484,19 +546,21 @@ namespace HaveIBeenPwnedPlugin
                             {
                                 checkedEntriesCount++;
                                 bool wasTagged = entry.HasTag(BreachedTag);
+                                bool entryModified;
                                 if (result.isBreached)
                                 {
-                                    modified |= UpdateEntryWithBreachInformation(entry, result.breachCount);
+                                    entryModified = UpdateEntryWithBreachInformation(entry, result.breachCount);
                                     if (!wasTagged) addedPwnedTagCount++;
                                     pwnedEntriesCount++;
                                 }
                                 else
                                 {
-                                    modified |= UpdateEntryRemoveBreachInformation(entry);
+                                    entryModified = UpdateEntryRemoveBreachInformation(entry);
                                     if (wasTagged) removedPwnedTagCount++;
                                 }
                                 // Mark this database dirty before the next await (it may be saved or locked).
-                                if (modified) database.Modified = true;
+                                modified |= entryModified;
+                                if (entryModified) database.Modified = true;
                             }
                         }
                         if (_terminated) break;
@@ -517,8 +581,9 @@ namespace HaveIBeenPwnedPlugin
             }
             finally
             {
-                statusBarLogger.EndLogging();
-                _isBulkCheckRunning = false;
+                try { statusBarLogger.EndLogging(); }
+                finally { _isBulkCheckRunning = false; RefreshMenus(); }
+                await DrainPendingAutomaticChecksAsync();
             }
 
             if (_terminated) return new string[0];
@@ -570,6 +635,7 @@ namespace HaveIBeenPwnedPlugin
         {
             _checkPasswordOnEntryTouched = !_checkPasswordOnEntryTouched;
             UIUtil.SetChecked(sender as ToolStripMenuItem, _checkPasswordOnEntryTouched);
+            RefreshMenus();
         }
 
         private bool IsDatabaseOpen()

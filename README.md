@@ -6,7 +6,7 @@ lang: en-GB
 
 ## Maintenance fork
 
-This development fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
+This development fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. It also retains automatic checks queued during bulk scans, preserves clean state after saving unchanged results and synchronises settings across menus. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
 
 No fork release binaries have been published. The installation links below point to the original upstream release, which does not include these changes. Update checks are disabled in this development build until a fork release and its update manifest are available.
 

@@ -26,12 +26,26 @@ Reviewed upstream commit `bcb87b41ceed4ee32d11169dc1b25ae6105d9ffb` (v0.10.0). T
 
 The protocol still uses the [official HIBP range API](https://haveibeenpwned.com/API/v3#PwnedPasswords): only the five-character SHA-1 prefix is sent, response padding remains enabled, and suffix matching happens locally. No password/hash cache or additional runtime package was added. Manual single-entry checks continue to override ignore preferences; automatic and bulk checks respect them.
 
+## Three-party follow-up review
+
+Three separate source reviewers examined this plugin and the companion Dashboarder fork: security/privacy, robustness/lifecycle, and usability/theme compatibility. The implementing developer addressed their findings and ran the regression suite. Reviewers did not independently execute the tests or the real KeePass UI.
+
+| Classification | Finding | Implemented fix |
+| --- | --- | --- |
+| Required | Entry changes during a bulk scan were discarded, including a password edited after its row had already been checked. | Queue the latest immutable check context per entry, then revalidate and drain it after bulk cleanup. Suspended checks, ignored entries and shutdown still take precedence. |
+| Required | An earlier changed row made later unchanged results set the database dirty again after a save during the scan. | Mark the database dirty only for the current result's changes; retain a separate cumulative flag for final repainting. |
+| Required | Repeated manual failures became silent after the first automatic outage. | Report each manual single-entry failure; deduplicate automatic warnings and preserve breach metadata. |
+| Required | A range response had no practical buffer cap. | Reject responses over 2 MiB; the failure path preserves existing breach information. |
+| Usability | Different copies of the plugin menu showed stale settings, and busy actions silently returned. | Synchronise option checkmarks and busy availability across all menu copies and when opening them; use clearer labels, including the runtime paused state. |
+
+The companion Dashboarder fixes cover readable columns/window bounds, theme header contrast, multi-entry assignment, image ownership, bounded HTTP/decoding and download cancellation. Its own review records the detailed limits and verification.
+
 ## Verification
 
 - The original plugin and the changed plugin both built against the signed official KeePass 2.62 assembly, targeting .NET Framework 4.7.2.
 - Final Release builds completed with zero warnings and zero errors.
-- 64 offline regression checks passed using real KeePass entry/database classes, synthetic in-memory data and fake HTTP handlers/loggers.
-- One additional live request using the documented HIBP example hash passed: 65 checks in total. Only its five-character prefix was sent.
+- 69 offline regression checks passed using real KeePass entry/database classes, synthetic in-memory data and fake HTTP handlers/loggers.
+- One additional live request using the documented HIBP example hash passed: 70 checks in total. Only its five-character prefix was sent.
 - An initial 40-check subset was also run against the unmodified upstream source: 13 passed and 27 failed. Several checks exercise different cases of the same underlying issue; this is not a count of distinct vulnerabilities.
 - Checks cover delayed responses, changed passwords, database switches/locks, removed/replaced entries, temporary clones, request duplication, HTTP failures/timeouts, malformed responses, metadata updates, progress, dirty-state timing and logging cleanup.
 - The NuGet advisory check reported no known vulnerable direct or transitive packages in the configured advisory data. The existing build-only Nerdbank.GitVersioning package was retained.
@@ -43,7 +57,7 @@ Automatic entry events can originate on worker threads in other plugins. They ar
 
 Metadata changes also invalidate the main window's child controls after refreshing entries. This lets details panels repaint live tags while preserving entry dates and selection. Bulk scans request this repaint when metadata changed.
 
-Tests exercised the actual icon mutation methods from Custom Icon Dashboarder v1.3.0 and the companion maintenance build 1.3.1.0. The v1.3.0 PLGX source was extracted locally, and its source files matched the release tag; only its packaged project template differed.
+Tests exercised the actual icon mutation methods from Custom Icon Dashboarder v1.3.0 and the companion maintenance build 1.4.0.0. The v1.3.0 PLGX source was extracted locally, and its source files matched the release tag; only its packaged project template differed.
 
 The exact released Fluent Theme v1.5.2026.1111 DLL was checked against the release asset digest (`661d27062f0584afe39bd71dc118031355a4457fac4bbc3a85de67a49f93f474`). Its actual details panel rendered synthetic `pwned` tag additions/removals correctly off-screen in light and dark modes without changing entry dates. No third-party plugin source or DLL is bundled in this repository.
 

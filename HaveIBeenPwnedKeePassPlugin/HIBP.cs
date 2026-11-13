@@ -26,6 +26,7 @@ namespace HaveIBeenPwnedPlugin
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            _httpClient.MaxResponseContentBufferSize = 2 * 1024 * 1024;
             _httpClient.DefaultRequestHeaders.Add("User-Agent", $"KeePass Plugin {nameof(HaveIBeenPwnedPlugin)}");
             _httpClient.DefaultRequestHeaders.Add("Add-Padding", "true");
         }

@@ -185,6 +185,7 @@ internal static partial class Program
                 Assert(requests == 0);
             }
         });
+        RunReviewTests();
         RunWorkerEventTests();
         int dashboarderOption = Array.IndexOf(args, "--dashboarder");
         if (dashboarderOption >= 0)
@@ -341,7 +342,7 @@ internal static partial class Program
     {
         var plugin = new HaveIBeenPwnedPluginExt();
         ((HIBP)typeof(HaveIBeenPwnedPluginExt).GetField("_hibp", Private).GetValue(plugin)).Dispose();
-        Set(plugin, "_hibp", NewClient(handler)); plugin.Initialize(host); return plugin;
+        Set(plugin, "_hibp", NewClient(handler)); Set(plugin, "_showWarning", (Action<string[]>)(messages => { })); plugin.Initialize(host); return plugin;
     }
     private static Task CheckEntry(HaveIBeenPwnedPluginExt plugin, PwEntry entry, Action callback, bool automatic)
     {
