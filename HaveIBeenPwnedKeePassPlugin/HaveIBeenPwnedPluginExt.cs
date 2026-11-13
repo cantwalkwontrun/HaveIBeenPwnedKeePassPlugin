@@ -40,12 +40,17 @@ namespace HaveIBeenPwnedPlugin
         private readonly Dictionary<PwEntry, EntryCheckContext> _pendingAutomaticChecks = new Dictionary<PwEntry, EntryCheckContext>();
         private readonly List<ToolStripMenuItem> _menus = new List<ToolStripMenuItem>();
         private Action<string[]> _showWarning = messages => MessageService.ShowWarning(messages);
+        private Action<PwGroup> _displayEntryGroup;
         private SynchronizationContext _uiContext;
         private int _uiThreadId;
 
-        public HaveIBeenPwnedPluginExt() => _hibp = new HIBP();
+        public HaveIBeenPwnedPluginExt()
+        {
+            _hibp = new HIBP();
+            _displayEntryGroup = group => _pluginHost.MainWindow?.UpdateUI(false, null, false, null, true, group, false);
+        }
 
-        // This development fork has no published binaries or update manifest yet.
+        // Updates are manual through the fork's releases; no automatic update manifest is used.
         public override string UpdateUrl => null;
 
         /// <summary>
@@ -248,7 +253,7 @@ namespace HaveIBeenPwnedPlugin
                     else if (option.Name == Option_IgnoreExpiredEntries) option.Checked = _isIgnoreExpiredEntriesEnabled;
                     else if (option.Name == Option_ShowGoodNewsOnManualEntryCheck) option.Checked = _isShowGoodNewsOnManualEntryCheckEnabled;
                     else if (option.Name == Option_ModifyPwEntryDates) option.Checked = _isModifyPwEntryDatesEnabled;
-                    else if (option.Name == "CheckCurrent" || option.Name == "CheckAll")
+                    else if (option.Name == "CheckCurrent" || option.Name == "CheckAll" || option.Name == "ShowAffectedAccounts")
                         option.Enabled = !_terminated && !busy && _pluginHost != null && IsDatabaseOpen();
                 }
             }
@@ -350,6 +355,20 @@ namespace HaveIBeenPwnedPlugin
             };
             checkAllPasswordsMenuItem.Click += CheckAllPasswordsMenuItem_ClickAsync;
             pluginRootMenuItem.DropDownItems.Add(checkAllPasswordsMenuItem);
+
+            ToolStripMenuItem showAffectedAccountsMenuItem = new ToolStripMenuItem
+            {
+                Name = "ShowAffectedAccounts",
+                Text = "Show accounts with breached passwords",
+                ToolTipText = "Show entries tagged pwned from previous checks. Skipped or changed entries may retain older results."
+            };
+            showAffectedAccountsMenuItem.Click += (sender, args) =>
+            {
+                if (_terminated || _isBulkCheckRunning || _entriesBeingChecked.Count > 0 || !IsDatabaseOpen()) return;
+                var database = _pluginHost.Database;
+                ShowAffectedAccounts(database, database.RootGroup);
+            };
+            pluginRootMenuItem.DropDownItems.Add(showAffectedAccountsMenuItem);
 
             pluginRootMenuItem.DropDownItems.Add(new ToolStripSeparator());
 
@@ -493,6 +512,26 @@ namespace HaveIBeenPwnedPlugin
             if (!_terminated) MessageService.ShowInfo(messages);
         }
 
+        private bool ShowAffectedAccounts(PwDatabase database, PwGroup rootGroup)
+        {
+            if (_terminated || database == null || !database.IsOpen || rootGroup == null ||
+                !ReferenceEquals(database, _pluginHost.Database) || !ReferenceEquals(rootGroup, database.RootGroup)) return false;
+
+            // Like KeePass search results, reference the live entries without moving or cloning them.
+            // The normal entry list retains KeePass's masking, editing and lock behaviour.
+            var results = new PwGroup(true, true, "Accounts with breached passwords (last recorded results)", PwIcon.EMailSearch)
+            {
+                IsVirtual = true,
+                Notes = "Entries tagged pwned. Skipped or changed entries may retain older results. " +
+                    "A password match does not establish that this particular account was breached."
+            };
+            foreach (var entry in rootGroup.GetEntries(true))
+                if (entry.HasTag(BreachedTag)) results.AddEntry(entry, false, false);
+
+            _displayEntryGroup(results);
+            return true;
+        }
+
         private async Task<string[]> CheckAllPasswordsAsync(PwDatabase database, KeePassLib.Interfaces.IStatusLogger statusBarLogger)
         {
             var rootGroup = database.RootGroup;
@@ -588,7 +627,10 @@ namespace HaveIBeenPwnedPlugin
 
             if (_terminated) return new string[0];
             if (ReferenceEquals(database, _pluginHost.Database) && database.IsOpen && ReferenceEquals(rootGroup, database.RootGroup))
+            {
                 UpdateUI_EntryList(false, modified);
+                ShowAffectedAccounts(database, rootGroup);
+            }
             return new[] { interrupted ? "Password check incomplete." : "Password check completed.",
                                     $"Checked entries: {checkedEntriesCount}",
                                     $"Pwned entries: {pwnedEntriesCount}",
@@ -597,7 +639,9 @@ namespace HaveIBeenPwnedPlugin
                                     $"Skipped expired entries: {skippedExpiredEntriesCount}",
                                     $"Skipped ignored entries: {skippedIgnoredEntriesCount}",
                                     $"Skipped entries with empty passwords: {skippedEmptyPasswordEntriesCount}",
-                                    $"Skipped changed or unavailable entries: {skippedChangedEntriesCount}" };
+                                    $"Skipped changed or unavailable entries: {skippedChangedEntriesCount}",
+                                    "Use 'Show accounts with breached passwords' to reopen last recorded results, including skipped entries.",
+                                    "A password match does not establish that the account itself was breached." };
         }
 
         private void UpdateUI_EntryList(bool setModified, bool refreshDetails = false)

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-13
+### Added
+- Display accounts with recorded breached-password results in KeePass's native entry list after bulk checks.
+- Add a menu action to reopen those results without contacting HIBP. Preserve native entry ownership, password masking and database locking behaviour.
+- Explain that skipped entries can retain previous results and that a password match does not prove an account breach.
+
 ## [0.10.1] - 2026-11-13
 ### Fixed
 - Discard obsolete asynchronous results and editor/history-copy checks; marshal automatic entry events to the UI context.

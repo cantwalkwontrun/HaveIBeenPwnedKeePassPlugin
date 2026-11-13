@@ -8,7 +8,13 @@ lang: en-GB
 
 This maintenance fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. It also retains automatic checks queued during bulk scans, preserves clean state after saving unchanged results and synchronises settings across menus. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
 
-Version **0.10.1** is distributed as `HaveIBeenPwnedPlugin.dll` from this fork's [releases](https://github.com/cantwalkwontrun/HaveIBeenPwnedKeePassPlugin/releases). KeePass update notifications remain intentionally disabled; check the fork releases manually. Verify the DLL with `Get-FileHash -Algorithm SHA256` against the release's `SHA256SUMS.txt`.
+Version **0.11.0** is distributed as `HaveIBeenPwnedPlugin.dll` from this fork's [releases](https://github.com/cantwalkwontrun/HaveIBeenPwnedKeePassPlugin/releases). KeePass update notifications remain intentionally disabled; check the fork releases manually. Verify the DLL with `Get-FileHash -Algorithm SHA256` against the release's `SHA256SUMS.txt`.
+
+## Viewing affected accounts
+
+After **Check all passwords**, the plugin displays entries tagged `pwned` in KeePass's normal entry list. Use **Tools → Have I Been Pwned → Show accounts with breached passwords** to reopen the list without another network request. Your configured Title, User Name and URL columns identify each account; double-click an entry to edit it as usual. Select a group to return to your normal view.
+
+These are **last recorded password-check results**. Ignored, expired, changed or unchecked entries can retain an older `pwned` tag. Reopening the list refreshes its membership; a completed bulk scan also replaces it, including with an empty list when no tags remain. A password match means that the password appears in HIBP data; it does not establish that the particular account was breached. This feature adds no account or email-address lookup and sends no entry titles, usernames or URLs to HIBP.
 
 ## Building and testing
 

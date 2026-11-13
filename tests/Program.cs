@@ -186,6 +186,7 @@ internal static partial class Program
             }
         });
         RunReviewTests();
+        RunAffectedAccountTests();
         RunWorkerEventTests();
         int dashboarderOption = Array.IndexOf(args, "--dashboarder");
         if (dashboarderOption >= 0)
@@ -256,6 +257,7 @@ internal static partial class Program
             return pending.Task;
         }));
         Set(plugin, "_hasReportedHibpError", true);
+        int displays = 0; Set(plugin, "_displayEntryGroup", (Action<PwGroup>)(group => displays++));
         try
         {
             var task = (Task<string[]>)Invoke(plugin, "CheckAllPasswordsAsync", original, logger);
@@ -280,9 +282,9 @@ internal static partial class Program
                 if (scenario == "ignored") Assert(requests == 0 && logger.Progress == 100 && Array.IndexOf(summary, "Checked entries: 0") >= 0);
                 if (scenario == "empty") Assert(requests == 0 && Array.IndexOf(summary, "Checked entries: 0") >= 0);
                 if (scenario == "changed") Assert(first.HasTag("pwned") && !original.Modified);
-                if (scenario == "switched" || scenario == "switched-last") Assert(requests == 1 && first.HasTag("pwned") && !host.Database.Modified && summary[0].Contains("incomplete"));
+                if (scenario == "switched" || scenario == "switched-last") Assert(requests == 1 && first.HasTag("pwned") && !host.Database.Modified && summary[0].Contains("incomplete") && displays == 0);
                 if (scenario == "timeout") Assert(!first.HasTag("pwned") && second.HasTag("pwned") && original.Modified && Array.IndexOf(summary, "Checked entries: 1") >= 0 && summary[0].Contains("incomplete"));
-                if (scenario == "locked") Assert(first.HasTag("pwned") && summary[0].Contains("incomplete"));
+                if (scenario == "locked") Assert(first.HasTag("pwned") && summary[0].Contains("incomplete") && displays == 0);
                 if (scenario == "invalid") Assert(first.HasTag("pwned") && !original.Modified && summary[0].Contains("incomplete"));
             }
             Assert(logger.Started && logger.Ended && !(bool)typeof(HaveIBeenPwnedPluginExt).GetField("_isBulkCheckRunning", Private).GetValue(plugin));

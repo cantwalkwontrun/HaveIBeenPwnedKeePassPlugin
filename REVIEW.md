@@ -65,9 +65,17 @@ Optional fixture checks can be selected with `--dashboarder` followed by a Dashb
 
 ## Limits and recommendations
 
+### Affected-account view (0.11.0)
+
+Bulk checks now display a virtual group of live entries carrying the `pwned` tag in KeePass's native entry list. A menu action reopens that view without a network request. The list uses last recorded results, including older tags retained on skipped entries; it does not assert that an account itself was breached. No titles, usernames or URLs are added to requests, and entries are neither cloned nor moved.
+
+Three separate source reviewers checked privacy/security, lifecycle/ownership and usability. They identified an empty-result case that could leave previous rows displayed; the fix always replaces the result group, including when empty. Each reviewer rechecked the fix and reported no remaining concrete blocker. Their reviews were source-only.
+
+The Release build completed with zero warnings and errors. All 79 offline checks passed, including the optional Dashboarder and Fluent Theme fixtures. New checks cover account mapping, shared-password entries, no network activity when reopening results, preserved ownership and protected fields, busy/lock/shutdown availability, lock/switch/root replacement guards, skipped-result labelling and breached-to-clean view replacement. Interactive operation inside the installed KeePass application remains unverified for this feature.
+
 Interactive KeePass menu behaviour, modal alerts, save/lock/shutdown timing inside the real application, Linux/Mono and older .NET/Windows environments have not been validated. Test in an isolated KeePass copy with a disposable database before using a compiled build with important data. The harness does not open or save an existing password database.
 
-The v0.10.1 fork release supplies the DLL and its SHA-256 checksum. KeePass update notifications remain intentionally disabled; updates are manual through this fork's release page. The legacy version manifest is kept in step with the release but is not consulted by the disabled UpdateUrl.
+The v0.11.0 fork release supplies the DLL and its SHA-256 checksum. KeePass update notifications remain intentionally disabled; updates are manual through this fork's release page. The legacy version manifest is kept in step with the release but is not consulted by the disabled UpdateUrl.
 
 Optional later improvements include a cancellable bulk-scan UI and clearer non-modal notifications. These are recommendations, not prerequisites for the correctness fixes. Automatic checks still run when live entries are modified, as configured upstream; this change does not introduce a new password-change-only trigger policy.
 
