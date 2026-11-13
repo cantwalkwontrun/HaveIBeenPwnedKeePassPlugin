@@ -8,7 +8,7 @@ lang: en-GB
 
 This maintenance fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. It also retains automatic checks queued during bulk scans, preserves clean state after saving unchanged results and synchronises settings across menus. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
 
-Version **0.10.1** is distributed as `HaveIBeenPwnedPlugin.dll` from this fork's [releases](https://github.com/noswimmingplease/HaveIBeenPwnedKeePassPlugin/releases). KeePass update notifications remain intentionally disabled; check the fork releases manually. Verify the DLL with `Get-FileHash -Algorithm SHA256` against the release's `SHA256SUMS.txt`.
+Version **0.10.1** is distributed as `HaveIBeenPwnedPlugin.dll` from this fork's [releases](https://github.com/cantwalkwontrun/HaveIBeenPwnedKeePassPlugin/releases). KeePass update notifications remain intentionally disabled; check the fork releases manually. Verify the DLL with `Get-FileHash -Algorithm SHA256` against the release's `SHA256SUMS.txt`.
 
 ## Building and testing
 
@@ -46,7 +46,7 @@ Your password never leaves KeePass! This is ensured by using a [k-Anonymity mode
  - On some Linux systems, the `mono-complete` package may be required for plugins to work properly ([Details on keepass.info](https://keepass.info/help/v2/setup.html#mono))
 
 ### How to install/update
- 1. Download the [latest fork release (.dll file) from GitHub](https://github.com/noswimmingplease/HaveIBeenPwnedKeePassPlugin/releases/latest)
+ 1. Download the [latest fork release (.dll file) from GitHub](https://github.com/cantwalkwontrun/HaveIBeenPwnedKeePassPlugin/releases/latest)
  2. In KeePass, click 'Tools' → 'Plugins' → button 'Open Folder'  
     *KeePass now opens a folder called 'Plugins'*
  3. Exit KeePass and retain one currently working plugin copy locally for rollback
