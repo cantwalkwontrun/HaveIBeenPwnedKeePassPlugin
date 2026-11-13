@@ -28,7 +28,7 @@ The protocol still uses the [official HIBP range API](https://haveibeenpwned.com
 
 ## Three-party follow-up review
 
-Three separate source reviewers examined this plugin and the companion Dashboarder fork: security/privacy, robustness/lifecycle, and usability/theme compatibility. The implementing developer addressed their findings and ran the regression suite. Reviewers did not independently execute the tests or the real KeePass UI.
+Three separate source reviewers examined this plugin and the companion Dashboarder fork: security/privacy, robustness/lifecycle, and usability/theme compatibility. The implementing developer addressed their findings and ran the regression suite. Two further rounds rechecked both projects before release, including the additional Dashboarder busy-state, row-threading and narrow-action-row fixes. Reviewers did not independently execute the tests or the real KeePass UI.
 
 | Classification | Finding | Implemented fix |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Automatic entry events can originate on worker threads in other plugins. They ar
 
 Metadata changes also invalidate the main window's child controls after refreshing entries. This lets details panels repaint live tags while preserving entry dates and selection. Bulk scans request this repaint when metadata changed.
 
-Tests exercised the actual icon mutation methods from Custom Icon Dashboarder v1.3.0 and the companion maintenance build 1.4.0.0. The v1.3.0 PLGX source was extracted locally, and its source files matched the release tag; only its packaged project template differed.
+Tests exercised the actual icon mutation methods from Custom Icon Dashboarder v1.3.0 and the companion maintenance build 1.4.1.0. The v1.3.0 PLGX source was extracted locally, and its source files matched the release tag; only its packaged project template differed.
 
 The exact released Fluent Theme v1.5.2026.1111 DLL was checked against the release asset digest (`661d27062f0584afe39bd71dc118031355a4457fac4bbc3a85de67a49f93f474`). Its actual details panel rendered synthetic `pwned` tag additions/removals correctly off-screen in light and dark modes without changing entry dates. No third-party plugin source or DLL is bundled in this repository.
 
@@ -67,7 +67,7 @@ Optional fixture checks can be selected with `--dashboarder` followed by a Dashb
 
 Interactive KeePass menu behaviour, modal alerts, save/lock/shutdown timing inside the real application, Linux/Mono and older .NET/Windows environments have not been validated. Test in an isolated KeePass copy with a disposable database before using a compiled build with important data. The harness does not open or save an existing password database.
 
-This fork has no published binary release. Development builds disable update checks until a fork release and matching update manifest are prepared, preventing upstream version information from being mistaken for fork updates. Inherited installation links refer to the original upstream binaries.
+The v0.10.1 fork release supplies the DLL and its SHA-256 checksum. KeePass update notifications remain intentionally disabled; updates are manual through this fork's release page. The legacy version manifest is kept in step with the release but is not consulted by the disabled UpdateUrl.
 
 Optional later improvements include a cancellable bulk-scan UI and clearer non-modal notifications. These are recommendations, not prerequisites for the correctness fixes. Automatic checks still run when live entries are modified, as configured upstream; this change does not introduce a new password-change-only trigger policy.
 

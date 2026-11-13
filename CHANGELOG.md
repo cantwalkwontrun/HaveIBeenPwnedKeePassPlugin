@@ -1,8 +1,23 @@
+---
+lang: en-GB
+---
+
 # Changelog
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.10.1] - 2026-11-13
+### Fixed
+- Discard obsolete asynchronous results and editor/history-copy checks; marshal automatic entry events to the UI context.
+- Preserve breach information after request failures and reject malformed or oversized responses.
+- Correct breach counts, progress, UTC dates, dirty-state timing and status cleanup.
+- Retain automatic checks queued during bulk scans, synchronise menu copies and report repeated manual failures.
+
+### Changed
+- Keep HTTP/TLS policy local to each client, clear temporary password-byte buffers and refresh theme details after metadata changes.
+- Fork releases provide a DLL and SHA-256 checksum; update notifications remain disabled and updates are manual.
 
 ## [0.10.0] - 2025-11-19
 ### Changed

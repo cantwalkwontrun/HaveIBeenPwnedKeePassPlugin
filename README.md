@@ -6,9 +6,9 @@ lang: en-GB
 
 ## Maintenance fork
 
-This development fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. It also retains automatic checks queued during bulk scans, preserves clean state after saving unchanged results and synchronises settings across menus. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
+This maintenance fork fixes stale asynchronous results, history/editor-copy checks, HTTP error handling and breach metadata. It also retains automatic checks queued during bulk scans, preserves clean state after saving unchanged results and synchronises settings across menus. See [REVIEW.md](./REVIEW.md) for findings, verification and limitations.
 
-No fork release binaries have been published. The installation links below point to the original upstream release, which does not include these changes. Update checks are disabled in this development build until a fork release and its update manifest are available.
+Version **0.10.1** is distributed as `HaveIBeenPwnedPlugin.dll` from this fork's [releases](https://github.com/noswimmingplease/HaveIBeenPwnedKeePassPlugin/releases). KeePass update notifications remain intentionally disabled; check the fork releases manually. Verify the DLL with `Get-FileHash -Algorithm SHA256` against the release's `SHA256SUMS.txt`.
 
 ## Building and testing
 
@@ -41,15 +41,15 @@ Your password never leaves KeePass! This is ensured by using a [k-Anonymity mode
 #### Windows
  - [.NET Framework 4.7.2](https://dotnet.microsoft.com/download/thank-you/net472) or higher
 
-#### Linux
+#### Linux (unverified in this fork)
  - [Mono 5.18](https://www.mono-project.com/docs/about-mono/releases/5.18.0/) or higher
  - On some Linux systems, the `mono-complete` package may be required for plugins to work properly ([Details on keepass.info](https://keepass.info/help/v2/setup.html#mono))
 
 ### How to install/update
- 1. Download the [latest release (.dll file) from GitHub](https://github.com/kapsiR/HaveIBeenPwnedKeePassPlugin/releases)
+ 1. Download the [latest fork release (.dll file) from GitHub](https://github.com/noswimmingplease/HaveIBeenPwnedKeePassPlugin/releases/latest)
  2. In KeePass, click 'Tools' → 'Plugins' → button 'Open Folder'  
     *KeePass now opens a folder called 'Plugins'*
- 3. Exit KeePass to free up the lock on the plugin
+ 3. Exit KeePass and retain one currently working plugin copy locally for rollback
  4. Move the plugin file into the 'Plugins' folder (replace if exists already)  
  5. Start KeePass again
 
